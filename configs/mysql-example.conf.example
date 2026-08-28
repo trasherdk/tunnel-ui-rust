@@ -1,0 +1,10 @@
+# Example saved tunnel — copy to name.conf or run New in the TUI
+NAME=mysql-example
+COMMENT=videoscan
+SSH_TARGET=my-ssh-alias
+LOCAL_PORT=3306
+REMOTE_HOST=127.0.0.1
+REMOTE_PORT=3306
+SSH_KEY=
+RECONNECT=1
+RECONNECT_DELAY=3
