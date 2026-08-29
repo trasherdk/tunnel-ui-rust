@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// Resolved data directories. Configs and `.state` live next to the binary
-/// (or under `TUNNEL_HOME`), never in a sibling `tunnel` tree.
+/// Resolved data directories. Configs and `.state` live under the app root:
+/// `~/.tunnel-ui` for an installed binary, cwd for Cargo `target/debug|release`,
+/// or `TUNNEL_HOME` if set.
 #[derive(Debug, Clone)]
 pub struct Paths {
     #[allow(dead_code)]
@@ -34,6 +35,7 @@ impl Paths {
             env::var("TUNNEL_STATE_DIR").ok(),
             current_exe_dir(),
             env::current_dir().ok(),
+            home_dir(),
         )
     }
 
@@ -80,11 +82,13 @@ pub fn from_parts(
     state_dir: Option<String>,
     exe_dir: Option<PathBuf>,
     cwd: Option<PathBuf>,
+    home: Option<PathBuf>,
 ) -> Paths {
     let root = resolve_app_root(
         tunnel_home.as_deref().filter(|s| !s.is_empty()),
         exe_dir.as_deref(),
         cwd.as_deref(),
+        home.as_deref(),
     );
     let config_dir = nonempty_path(config_dir).unwrap_or_else(|| root.join("configs"));
     let state_dir = nonempty_path(state_dir).unwrap_or_else(|| root.join(".state"));
@@ -99,18 +103,31 @@ fn nonempty_path(v: Option<String>) -> Option<PathBuf> {
     v.filter(|s| !s.is_empty()).map(PathBuf::from)
 }
 
+fn home_dir() -> Option<PathBuf> {
+    env::var("HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
 pub fn resolve_app_root(
     tunnel_home: Option<&str>,
     exe_dir: Option<&Path>,
     cwd: Option<&Path>,
+    home: Option<&Path>,
 ) -> PathBuf {
     if let Some(h) = tunnel_home.filter(|s| !s.is_empty()) {
         return PathBuf::from(h);
     }
     if let Some(dir) = exe_dir {
-        if !use_cwd_instead(dir) {
-            return dir.to_path_buf();
+        if use_cwd_instead(dir) {
+            return cwd
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| PathBuf::from("."));
         }
+    }
+    if let Some(home) = home {
+        return home.join(".tunnel-ui");
     }
     cwd.map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."))
@@ -288,6 +305,7 @@ mod tests {
             Some("/tmp/th"),
             Some(Path::new("/usr/bin")),
             Some(Path::new("/home/x")),
+            Some(Path::new("/home/x")),
         );
         assert_eq!(root, PathBuf::from("/tmp/th"));
     }
@@ -298,18 +316,20 @@ mod tests {
             None,
             Some(Path::new("/home/x/tunnel-ui-rust/target/debug")),
             Some(Path::new("/home/x/tunnel-ui-rust")),
+            Some(Path::new("/home/x")),
         );
         assert_eq!(root, PathBuf::from("/home/x/tunnel-ui-rust"));
     }
 
     #[test]
-    fn installed_binary_uses_exe_dir() {
+    fn installed_binary_uses_dot_tunnel_ui() {
         let root = resolve_app_root(
             None,
             Some(Path::new("/usr/local/bin")),
             Some(Path::new("/tmp")),
+            Some(Path::new("/home/x")),
         );
-        assert_eq!(root, PathBuf::from("/usr/local/bin"));
+        assert_eq!(root, PathBuf::from("/home/x/.tunnel-ui"));
     }
 
     #[test]

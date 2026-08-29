@@ -27,15 +27,14 @@ cargo build --release
 
 The binary is `target/release/tunnel-ui`. Keep it named `tunnel-ui` (the name is how the app recognizes its own supervisor).
 
-`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/`. An installed copy (not under `target/debug` or `target/release`) uses the directory the binary lives in, unless you set `TUNNEL_HOME`.
+`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed copy uses `~/.tunnel-ui` (`configs/` and `.state/` under that). `TUNNEL_HOME` overrides either.
 
 ```bash
-# run from the crate root so configs/ next to cwd resolve
+# run from the crate root so repo configs/ resolve
 ./target/release/tunnel-ui
 
-# or install somewhere and point data at a home dir
+# install; data goes to ~/.tunnel-ui
 install -m 755 target/release/tunnel-ui /usr/local/bin/tunnel-ui
-TUNNEL_HOME=/var/lib/tunnel-ui /usr/local/bin/tunnel-ui
 ```
 
 ## Keys
@@ -70,7 +69,7 @@ List status:
 - `[off]` — not running
 - `[err]` — supervisor or last start failed (host key, auth, bind, and similar). The status bar shows the SSH message.
 
-Saved files live in `configs/<name>.conf`. Runtime PIDs and logs live in `.state/` (not committed). See `configs/mysql-example.conf.example`.
+Saved files live in `configs/<name>.conf`. Runtime PIDs and logs live in `.state/` (not committed). Under an installed binary that is `~/.tunnel-ui/configs` and `~/.tunnel-ui/.state`. See `configs/mysql-example.conf.example`.
 
 ## CLI
 
@@ -93,7 +92,7 @@ The list also shows live `ssh` processes this app did not start, including Curso
 
 | Variable | Meaning |
 | --- | --- |
-| `TUNNEL_HOME` | App root (`configs/`, `.state/`). Default: directory of the executable, or cwd when running from `target/debug` or `target/release` |
+| `TUNNEL_HOME` | App root (`configs/`, `.state/`). Default: `~/.tunnel-ui`, or cwd when running from `target/debug` or `target/release` |
 | `TUNNEL_CONFIG_DIR` | Saved `*.conf` |
 | `TUNNEL_STATE_DIR` | PIDs and logs |
 | `SSH` | `ssh` executable |
