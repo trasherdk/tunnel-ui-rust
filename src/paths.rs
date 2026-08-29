@@ -253,6 +253,7 @@ fn is_supervisor_noise(line: &str) -> bool {
         "Tunnel exited",
         "Reconnect disabled",
         "Fatal SSH error",
+        "Cannot assign requested address",
     ];
     NOISE.iter().any(|n| l.contains(n))
 }

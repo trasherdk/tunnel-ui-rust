@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 
@@ -127,6 +127,23 @@ fn ssh_child_alive(paths: &Paths, name: &str) -> bool {
     pid_alive(child) && is_ssh_process(child)
 }
 
+/// Wait until ssh is listening, or the supervisor has exited.
+fn wait_for_listen(paths: &Paths, name: &str, port: &str, budget: Duration) -> bool {
+    let deadline = Instant::now() + budget;
+    loop {
+        if ssh_holding_port(port) {
+            return true;
+        }
+        if !supervisor_running(paths, name).1 {
+            return false;
+        }
+        if Instant::now() >= deadline {
+            return ssh_holding_port(port);
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
 fn setsid_command(cmd: &mut Command) {
     unsafe {
         cmd.pre_exec(|| {
@@ -148,12 +165,12 @@ pub fn start_tunnel(paths: &Paths, name: &str) -> Result<String> {
         if ssh_holding_port(&c.local_port) || ssh_child_alive(paths, name) {
             return Ok(format!("Tunnel {name:?} already running (PID {pid})"));
         }
-        let tail = crate::paths::tail_file(&sp.log_file, 8);
-        bail!(
-            "Tunnel {name:?} supervisor is running (PID {pid}) but ssh is not listening on port {}.\n{}",
-            c.local_port,
-            tail
-        );
+        if wait_for_listen(paths, name, &c.local_port, Duration::from_secs(16))
+            || supervisor_running(paths, name).1
+        {
+            return Ok(format!("Tunnel {name:?} already running (PID {pid})"));
+        }
+        bail!("{}", start_failure_text(paths, name, &c.local_port));
     }
     let _ = fs::remove_file(&sp.stop_file);
     clear_err_file(&sp.err_file);
@@ -180,25 +197,9 @@ pub fn start_tunnel(paths: &Paths, name: &str) -> Result<String> {
         let mut child = child;
         let _ = child.wait();
     });
-    thread::sleep(Duration::from_millis(400));
-    if let (pid, true) = supervisor_running(paths, name) {
-        // Supervisor can stay up while ssh dies immediately (reconnect loop).
-        // Wait briefly so a fast failure (host key, auth, bind) is visible.
-        for _ in 0..10 {
-            if ssh_holding_port(&c.local_port) {
-                clear_err_file(&sp.err_file);
-                return Ok(format!(
-                    "Starting tunnel {name:?}: {}\nTunnel {name:?} started (PID {pid}). Logs: {}",
-                    c.forward_summary(),
-                    sp.log_file.display()
-                ));
-            }
-            if !supervisor_running(paths, name).1 {
-                break;
-            }
-            thread::sleep(Duration::from_millis(120));
-        }
-        if ssh_holding_port(&c.local_port) {
+    thread::sleep(Duration::from_millis(200));
+    if wait_for_listen(paths, name, &c.local_port, Duration::from_secs(16)) {
+        if let (pid, true) = supervisor_running(paths, name) {
             clear_err_file(&sp.err_file);
             return Ok(format!(
                 "Starting tunnel {name:?}: {}\nTunnel {name:?} started (PID {pid}). Logs: {}",
@@ -206,17 +207,14 @@ pub fn start_tunnel(paths: &Paths, name: &str) -> Result<String> {
                 sp.log_file.display()
             ));
         }
-        if supervisor_running(paths, name).1 && ssh_child_alive(paths, name) {
-            return Ok(format!(
-                "Starting tunnel {name:?}: {}\nTunnel {name:?} started (PID {pid}). Logs: {}",
-                c.forward_summary(),
-                sp.log_file.display()
-            ));
-        }
-        if !supervisor_running(paths, name).1 {
-            let _ = fs::remove_file(&sp.pid_file);
-        }
-        bail!("{}", start_failure_text(paths, name, &c.local_port));
+    }
+    if let (pid, true) = supervisor_running(paths, name) {
+        // ssh is still connecting; list will show [on] once the port is up
+        return Ok(format!(
+            "Starting tunnel {name:?}: {}\nTunnel {name:?} started (PID {pid}). Logs: {}",
+            c.forward_summary(),
+            sp.log_file.display()
+        ));
     }
     let _ = fs::remove_file(&sp.pid_file);
     bail!("{}", start_failure_text(paths, name, &c.local_port));

@@ -177,5 +177,9 @@ mod tests {
         );
         assert_eq!(fatal_ssh_message("Connection reset by peer\n"), None);
         assert_eq!(fatal_ssh_message("Broken pipe\n"), None);
+        assert_eq!(
+            fatal_ssh_message("bind [::1]:8081: Cannot assign requested address\n"),
+            None
+        );
     }
 }
