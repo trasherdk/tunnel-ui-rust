@@ -111,7 +111,7 @@ impl Row {
                     config.comment_line()
                 )
             }
-            Row::Detected(d) => format!("{} {} {}", d.label, d.detail, d.command),
+            Row::Detected(d) => format!("{} {}", d.label, d.detail),
         }
     }
 
@@ -126,6 +126,7 @@ impl Row {
 }
 
 pub fn render_rows(frame: &mut Frame, area: Rect, rows: &[Row], selected: usize, scroll_rows: u16) {
+    theme::paint_fill(frame.buffer_mut(), area, theme::root());
     let mut y_skip = scroll_rows;
     let mut y = area.y;
     let bottom = area.y.saturating_add(area.height);
@@ -185,6 +186,18 @@ pub fn render_rows(frame: &mut Frame, area: Rect, rows: &[Row], selected: usize,
         if y >= bottom {
             return;
         }
+    }
+    if y < bottom {
+        theme::paint_fill(
+            frame.buffer_mut(),
+            Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: bottom.saturating_sub(y),
+            },
+            theme::root(),
+        );
     }
 }
 
@@ -258,6 +271,39 @@ pub fn ensure_visible(rows: &[Row], selected: usize, area_h: u16, scroll: &mut u
 mod tests {
     use super::*;
     use crate::config::Config;
+
+    #[test]
+    fn filter_uses_visible_text_not_ssh_command() {
+        let known = Row::Known {
+            config: Config {
+                name: "mysql-3306".into(),
+                comment: "videoscan".into(),
+                local_port: "3306".into(),
+                ..Config::default()
+            },
+            listening: true,
+            failed: false,
+        };
+        let cursor = Row::Detected(DetectedTunnel {
+            pid: 12,
+            kind: "remote-ssh".into(),
+            label: "Cursor Remote-SSH ghost-node".into(),
+            detail: "-D :6490  ghost-node".into(),
+            command: concat!(
+                r"C:\Windows\System32\OpenSSH\ssh.exe -T -D 6490 ",
+                r"-F C:\Users\x\.ssh\config ghost-node"
+            )
+            .into(),
+            local_ports: vec!["6490".into()],
+        });
+        assert!(known.matches("mysql"));
+        assert!(known.matches("3306"));
+        assert!(!cursor.matches("mysql"));
+        assert!(!cursor.matches("OpenSSH"));
+        assert!(!cursor.matches("Windows"));
+        assert!(cursor.matches("ghost-node"));
+        assert!(cursor.matches("6490"));
+    }
 
     #[test]
     fn index_at_y_uses_row_heights() {

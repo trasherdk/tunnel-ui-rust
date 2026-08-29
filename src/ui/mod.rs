@@ -111,11 +111,31 @@ impl App {
     }
 
     fn visible_rows(&self) -> Vec<Row> {
+        let filtering = !self.filter.trim().is_empty();
         self.rows
             .iter()
-            .filter(|r| r.matches(&self.filter))
+            .filter(|r| {
+                // Detected Cursor/other ssh is inspect-only; hide it while filtering
+                // saved setups so the last "other" row cannot stick around.
+                if filtering && matches!(r, Row::Detected(_)) {
+                    return false;
+                }
+                r.matches(&self.filter)
+            })
             .cloned()
             .collect()
+    }
+
+    fn clamp_list_cursor(&mut self) {
+        let n = self.visible_rows().len();
+        if n == 0 {
+            self.selected = 0;
+            self.scroll = 0;
+            return;
+        }
+        if self.selected >= n {
+            self.selected = n - 1;
+        }
     }
 
     fn refresh(&mut self) {
@@ -208,17 +228,24 @@ fn list_key(app: &mut App, key: KeyEvent) {
             KeyCode::Esc => {
                 app.filter_editing = false;
                 app.filter.clear();
+                app.clamp_list_cursor();
             }
             KeyCode::Enter => {
                 app.filter_editing = false;
+                app.clamp_list_cursor();
             }
             KeyCode::Backspace => {
                 app.filter.pop();
+                app.clamp_list_cursor();
             }
             KeyCode::Char('\u{7f}' | '\u{8}') => {
                 app.filter.pop();
+                app.clamp_list_cursor();
             }
-            KeyCode::Char(c) if !c.is_control() => app.filter.push(c),
+            KeyCode::Char(c) if !c.is_control() => {
+                app.filter.push(c);
+                app.clamp_list_cursor();
+            }
             _ => {}
         }
         return;
@@ -826,6 +853,7 @@ fn render_list(app: &mut App, frame: &mut Frame, area: Rect) {
         height: area.height.saturating_sub(1),
     };
     let vis = app.visible_rows();
+    app.clamp_list_cursor();
     list::ensure_visible(&vis, app.selected, list_area.height, &mut app.scroll);
     list::render_rows(frame, list_area, &vis, app.selected, app.scroll);
 }
