@@ -37,9 +37,9 @@ upgradepkg --install-new tunnel-ui-0.1.0-x86_64-1.txz
 removepkg tunnel-ui
 ```
 
-Windows: run `tunnel-ui-<ver>-setup.exe`. It installs under `%LOCALAPPDATA%\Programs\tunnel-ui` and does not need Administrator. Configs still live in `%USERPROFILE%\.tunnel-ui` (same as an installed Linux binary using `~/.tunnel-ui`).
+Windows: run `tunnel-ui-<ver>-setup.exe`. It does not need Administrator. You pick the install folder (default `%LOCALAPPDATA%\Programs\tunnel-ui`) and a **config/state folder** (default `data` under the install folder). The installer writes that path into `tunnel-home` next to `tunnel-ui.exe`. Uninstall does not delete your configs.
 
-You can still drop `tunnel-ui.exe` somewhere yourself if you do not want the installer.
+A portable `tunnel-ui.exe` with no `tunnel-home` file uses `%USERPROFILE%\.tunnel-ui`.
 
 Cut a release after bumping `[package].version` in `Cargo.toml`:
 
@@ -61,7 +61,7 @@ The binary is `target/release/tunnel-ui` (Linux) or `target/release/tunnel-ui.ex
 
 Version is `[package].version` in `Cargo.toml`. Print it with `tunnel-ui -v` or `tunnel-ui --version`. Bump that field when you cut a release.
 
-`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed copy (`/usr/local/bin`, the Windows installer, or any other non-`target` path) uses `~/.tunnel-ui` on Linux and `%USERPROFILE%\.tunnel-ui` on Windows. `TUNNEL_HOME` overrides either.
+`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed Linux copy uses `~/.tunnel-ui`. On Windows, a `tunnel-home` file next to the exe (written by the installer) selects the app root; otherwise `%USERPROFILE%\.tunnel-ui`. `TUNNEL_HOME` overrides all of these.
 
 ```bash
 # run from the crate root so repo configs/ resolve
@@ -132,10 +132,12 @@ The list also shows live `ssh` processes this app did not start, including Curso
 
 | Variable | Meaning |
 | --- | --- |
-| `TUNNEL_HOME` | App root (`configs/`, `.state/`). Default: `~/.tunnel-ui` / `%USERPROFILE%\.tunnel-ui`, or cwd when running from `target/debug` or `target/release` |
+| `TUNNEL_HOME` | App root (`configs/`, `.state/`). Wins over `tunnel-home` and the defaults below |
 | `TUNNEL_CONFIG_DIR` | Saved `*.conf` |
 | `TUNNEL_STATE_DIR` | PIDs and logs |
 | `SSH` | `ssh` executable |
+
+A `tunnel-home` file beside the executable (first line = directory) is used when `TUNNEL_HOME` is unset and the exe is not a Cargo `target/debug` or `target/release` build. Defaults without that file: cwd for Cargo builds, otherwise `~/.tunnel-ui` / `%USERPROFILE%\.tunnel-ui`.
 
 ## Host keys
 

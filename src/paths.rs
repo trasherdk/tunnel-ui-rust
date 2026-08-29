@@ -110,6 +110,22 @@ fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Path written next to the executable (Windows installer). First line is the
+/// app root (`configs/` and `.state/` go under it).
+fn read_tunnel_home_file(exe_dir: &Path) -> Option<PathBuf> {
+    let raw = fs::read_to_string(exe_dir.join("tunnel-home")).ok()?;
+    let line = raw
+        .lines()
+        .next()?
+        .trim()
+        .trim_start_matches('\u{feff}');
+    if line.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(line))
+    }
+}
+
 pub fn resolve_app_root(
     tunnel_home: Option<&str>,
     exe_dir: Option<&Path>,
@@ -124,6 +140,9 @@ pub fn resolve_app_root(
             return cwd
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| PathBuf::from("."));
+        }
+        if let Some(from_file) = read_tunnel_home_file(dir) {
+            return from_file;
         }
     }
     if let Some(home) = home {
@@ -400,6 +419,47 @@ mod tests {
             Some(Path::new("/home/x")),
         );
         assert_eq!(root, PathBuf::from("/home/x/.tunnel-ui"));
+    }
+
+    #[test]
+    fn sidecar_tunnel_home_next_to_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("tunnel-home"), "/opt/tunnels\r\n").unwrap();
+        let root = resolve_app_root(
+            None,
+            Some(dir.path()),
+            Some(Path::new("/tmp")),
+            Some(Path::new("/home/x")),
+        );
+        assert_eq!(root, PathBuf::from("/opt/tunnels"));
+    }
+
+    #[test]
+    fn env_tunnel_home_beats_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("tunnel-home"), "/opt/tunnels\n").unwrap();
+        let root = resolve_app_root(
+            Some("/tmp/th"),
+            Some(dir.path()),
+            Some(Path::new("/tmp")),
+            Some(Path::new("/home/x")),
+        );
+        assert_eq!(root, PathBuf::from("/tmp/th"));
+    }
+
+    #[test]
+    fn cargo_target_ignores_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe_dir = dir.path().join("target").join("debug");
+        fs::create_dir_all(&exe_dir).unwrap();
+        fs::write(exe_dir.join("tunnel-home"), "/opt/tunnels\n").unwrap();
+        let root = resolve_app_root(
+            None,
+            Some(&exe_dir),
+            Some(Path::new("/home/x/proj")),
+            Some(Path::new("/home/x")),
+        );
+        assert_eq!(root, PathBuf::from("/home/x/proj"));
     }
 
     #[test]
