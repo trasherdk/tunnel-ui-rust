@@ -1,5 +1,4 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use anyhow::{bail, Result};
@@ -339,8 +338,7 @@ pub fn save_config(paths: &Paths, mut c: Config) -> Result<String> {
         conf_quote(&c.reconnect),
         conf_quote(&c.reconnect_delay),
     );
-    fs::write(&path, body.as_bytes())?;
-    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o644));
+    crate::paths::write_mode(&path, body.as_bytes(), 0o644)?;
     Ok(format!(
         "Saved tunnel {:?} -> {}\n  {}",
         c.name,

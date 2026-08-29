@@ -1,20 +1,44 @@
 # tunnel-ui
 
-Terminal UI (and small CLI) for **SSH local port forwards** on Linux.
+Terminal UI (and small CLI) for **SSH local port forwards** on Linux and Windows.
 
 Save setups, start and stop them, reconnect when the SSH session drops, and see other live `ssh` forwards (including Cursor / VS Code Remote-SSH) without touching them.
 
-This is the Linux Rust port of [trasherdk/tunnel-ui](https://github.com/trasherdk/tunnel-ui). Config files are the same `configs/*.conf` format as the Windows Go app, so setups can be copied between machines.
+This is the Rust port of [trasherdk/tunnel-ui](https://github.com/trasherdk/tunnel-ui). Config files are the same `configs/*.conf` format as the Windows Go app, so setups can be copied between machines.
 
 It is not an interactive SSH client and not a VPN. It does not stop SSH processes started by other tools.
 
 ## Requirements
 
-- Linux (developed on headless Slackware; other distros are fine)
-- A **recent stable Rust** (`rustc` + `cargo`, edition 2021). Distro packages can be too old (Slackware 15 ships 1.58; Ratatui needs a current toolchain). [rustup](https://rustup.rs/) is the usual fix.
-- **OpenSSH** client: `ssh` on `PATH`, or set `SSH` to the binary
+- Linux or Windows
+- A **recent stable Rust** (`rustc` + `cargo`, edition 2021) if you build from source. Distro packages can be too old (Slackware 15 ships 1.58; Ratatui needs a current toolchain). [rustup](https://rustup.rs/) is the usual fix.
+- **OpenSSH** client: `ssh` on `PATH`, or set `SSH` to the binary. On Windows, the built-in OpenSSH client is enough (`ssh.exe`).
 
 No systemd. No Go.
+
+## Release binaries
+
+Pushing a version tag (`v0.1.0`, `v1.2.3`, …) runs GitHub Actions and attaches:
+
+| File | What it is |
+| --- | --- |
+| `tunnel-ui-linux-x86_64` | Statically linked Linux binary (musl) |
+| `tunnel-ui.exe` | Windows 64-bit executable (icon + GUI subsystem, same as the Go build) |
+
+On Windows, after you put `tunnel-ui.exe` somewhere permanent (for example `%USERPROFILE%\.tunnel-ui\tunnel-ui.exe`), run:
+
+```text
+tunnel-ui shortcut
+```
+
+That creates **SSH tunnels.lnk** on the Desktop and in the Start Menu, using the exe icon, working directory `%USERPROFILE%\.tunnel-ui`, and AppUserModelID `dk.fumlersoft.tunnel-ui` so you can pin it. Double-clicking the shortcut opens its own console titled **SSH tunnels**.
+
+Cut a release after bumping `[package].version` in `Cargo.toml`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## Build
 
@@ -25,11 +49,11 @@ cargo test
 cargo build --release
 ```
 
-The binary is `target/release/tunnel-ui`. Keep it named `tunnel-ui` (the name is how the app recognizes its own supervisor).
+The binary is `target/release/tunnel-ui` (Linux) or `target/release/tunnel-ui.exe` (Windows). Keep the name `tunnel-ui` (the name is how the app recognizes its own supervisor).
 
 Version is `[package].version` in `Cargo.toml`. Print it with `tunnel-ui -v` or `tunnel-ui --version`. Bump that field when you cut a release.
 
-`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed copy uses `~/.tunnel-ui` (`configs/` and `.state/` under that). `TUNNEL_HOME` overrides either.
+`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed copy uses `~/.tunnel-ui` on Linux and `%USERPROFILE%\.tunnel-ui` on Windows. `TUNNEL_HOME` overrides either.
 
 ```bash
 # run from the crate root so repo configs/ resolve
@@ -71,7 +95,7 @@ List status:
 - `[off]` — not running
 - `[err]` — supervisor or last start failed (host key, auth, bind, and similar). The status bar shows the SSH message.
 
-Saved files live in `configs/<name>.conf`. Runtime PIDs and logs live in `.state/` (not committed). Under an installed binary that is `~/.tunnel-ui/configs` and `~/.tunnel-ui/.state`. See `configs/mysql-example.conf.example`.
+Saved files live in `configs/<name>.conf`. Runtime PIDs and logs live in `.state/` (not committed). Under an installed binary that is `~/.tunnel-ui` (Linux) or `%USERPROFILE%\.tunnel-ui` (Windows). See `configs/mysql-example.conf.example`.
 
 ## CLI
 
@@ -83,9 +107,10 @@ tunnel-ui start <name>
 tunnel-ui stop <name>
 tunnel-ui status [name]
 tunnel-ui delete <name>
+tunnel-ui shortcut   # Windows: Start Menu + Desktop shortcuts
 ```
 
-Start/stop spawn a background supervisor (`setsid`) that runs `ssh -N -L …`. If the session drops, it reconnects. Config and auth failures (host key verification, permission denied, unusable key, DNS, local bind) **do not** loop; the supervisor exits and the TUI/CLI reports the error.
+Start/stop spawn a background supervisor that runs `ssh -N -L …`. If the session drops, it reconnects. Config and auth failures (host key verification, permission denied, unusable key, DNS, local bind) **do not** loop; the supervisor exits and the TUI/CLI reports the error.
 
 ## Other tunnels
 
@@ -95,7 +120,7 @@ The list also shows live `ssh` processes this app did not start, including Curso
 
 | Variable | Meaning |
 | --- | --- |
-| `TUNNEL_HOME` | App root (`configs/`, `.state/`). Default: `~/.tunnel-ui`, or cwd when running from `target/debug` or `target/release` |
+| `TUNNEL_HOME` | App root (`configs/`, `.state/`). Default: `~/.tunnel-ui` / `%USERPROFILE%\.tunnel-ui`, or cwd when running from `target/debug` or `target/release` |
 | `TUNNEL_CONFIG_DIR` | Saved `*.conf` |
 | `TUNNEL_STATE_DIR` | PIDs and logs |
 | `SSH` | `ssh` executable |

@@ -1,8 +1,13 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod config;
+mod console;
 mod detect;
 mod paths;
 mod proc;
 mod prune;
+mod shortcut;
+mod spawn;
 mod ssh;
 mod tunnel;
 mod ui;
@@ -32,9 +37,9 @@ Usage:
   tunnel-ui stop <name>     Stop a saved tunnel
   tunnel-ui status [name]   Show status
   tunnel-ui delete <name>   Stop and delete a saved tunnel
+  tunnel-ui shortcut        Windows: Start Menu + Desktop shortcuts (pin those)
   tunnel-ui -v | --version  Print version
   tunnel-ui -h | --help     Show this help
-  tunnel-ui shortcut        Windows-only (not available on Linux)
 
 Requires OpenSSH (ssh on PATH). Override the binary with SSH.
 "
@@ -53,6 +58,13 @@ fn main() -> ExitCode {
 
 fn real_main() -> Result<ExitCode> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let mode = match args.first().map(String::as_str) {
+        Some("--supervisor") => "supervisor",
+        None => "tui",
+        _ => "cli",
+    };
+    crate::console::prepare_console(mode);
+
     if args.first().map(String::as_str) == Some("--supervisor") {
         let name = args.get(1).cloned().unwrap_or_default();
         if name.is_empty() {
@@ -75,10 +87,16 @@ fn real_main() -> Result<ExitCode> {
                 println!("{}", version_line());
                 return Ok(ExitCode::SUCCESS);
             }
-            "shortcut" => {
-                println!("shortcut is Windows-only");
-                return Ok(ExitCode::SUCCESS);
-            }
+            "shortcut" => match crate::shortcut::install_shortcut() {
+                Ok(out) => {
+                    println!("{out}");
+                    return Ok(ExitCode::SUCCESS);
+                }
+                Err(e) => {
+                    let _ = writeln!(io::stderr(), "{e:#}");
+                    return Ok(ExitCode::from(1));
+                }
+            },
             "start" | "stop" | "status" | "delete" => {
                 let paths = Paths::from_env();
                 paths.ensure_dirs()?;

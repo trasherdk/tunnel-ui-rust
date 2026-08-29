@@ -196,7 +196,8 @@ fn render_title(frame: &mut Frame, area: Rect, row: &Row, selected: bool) {
             } else {
                 theme::title()
             };
-            Line::from(Span::styled(format!(" {}", d.label), style)).render(area, frame.buffer_mut());
+            Line::from(Span::styled(format!(" {}", d.label), style))
+                .render(area, frame.buffer_mut());
         }
     }
 }

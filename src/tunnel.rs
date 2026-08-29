@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Read;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -21,6 +20,7 @@ use crate::proc::{
     port_listeners_named, process_image, ssh_holding_port, ssh_holding_port_live, terminate_pid,
     unix_ssh_procs,
 };
+use crate::spawn::detach_command;
 use crate::ssh::{fatal_ssh_message, find_ssh};
 
 pub fn setup_on(paths: &Paths, c: &Config) -> bool {
@@ -144,18 +144,6 @@ fn wait_for_listen(paths: &Paths, name: &str, port: &str, budget: Duration) -> b
     }
 }
 
-fn setsid_command(cmd: &mut Command) {
-    unsafe {
-        cmd.pre_exec(|| {
-            if libc::setsid() == -1 {
-                Err(std::io::Error::last_os_error())
-            } else {
-                Ok(())
-            }
-        });
-    }
-}
-
 pub fn start_tunnel(paths: &Paths, name: &str) -> Result<String> {
     let c = load_named_config(paths, name)?;
     find_ssh()?;
@@ -189,7 +177,7 @@ pub fn start_tunnel(paths: &Paths, name: &str) -> Result<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_f.try_clone()?))
         .stderr(Stdio::from(log_f));
-    setsid_command(&mut cmd);
+    detach_command(&mut cmd);
     let child = cmd.spawn().context("start supervisor")?;
     let pid = child.id() as i32;
     write_pid_file(&sp.pid_file, pid)?;
@@ -249,7 +237,7 @@ pub fn run_supervisor(paths: &Paths, name: &str) -> Result<()> {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        setsid_command(&mut cmd);
+        detach_command(&mut cmd);
         match cmd.spawn() {
             Err(err) => {
                 let msg = format!("ssh start failed: {err}");
@@ -619,10 +607,12 @@ mod tests {
 
     #[test]
     fn ssh_chunk_after_start_marker() {
-        let log = "[t] Supervisor started\n[t] Starting SSH tunnel: x\nHost key verification failed.\n";
+        let log =
+            "[t] Supervisor started\n[t] Starting SSH tunnel: x\nHost key verification failed.\n";
         assert!(ssh_output_after_last_start(log).contains("Host key verification failed"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn supervisor_stops_on_host_key_failure() {
         use std::os::unix::fs::PermissionsExt;

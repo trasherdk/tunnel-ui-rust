@@ -22,12 +22,25 @@ pub fn find_ssh() -> Result<String> {
 }
 
 fn which_ssh() -> Result<String, ()> {
-    let path = env::var("PATH").unwrap_or_default();
-    for dir in path.split(':') {
-        if dir.is_empty() {
-            continue;
+    let names: &[&str] = if cfg!(windows) {
+        &["ssh.exe", "ssh"]
+    } else {
+        &["ssh"]
+    };
+    if let Some(path) = env::var_os("PATH") {
+        for dir in env::split_paths(&path) {
+            for name in names {
+                let cand = dir.join(name);
+                if cand.is_file() {
+                    return Ok(cand.to_string_lossy().into_owned());
+                }
+            }
         }
-        let cand = Path::new(dir).join("ssh");
+    }
+    #[cfg(windows)]
+    {
+        let windir = env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let cand = Path::new(&windir).join(r"System32\OpenSSH\ssh.exe");
         if cand.is_file() {
             return Ok(cand.to_string_lossy().into_owned());
         }

@@ -1,7 +1,6 @@
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -107,6 +106,7 @@ fn home_dir() -> Option<PathBuf> {
     env::var("HOME")
         .ok()
         .filter(|s| !s.is_empty())
+        .or_else(|| env::var("USERPROFILE").ok().filter(|s| !s.is_empty()))
         .map(PathBuf::from)
 }
 
@@ -162,9 +162,19 @@ fn current_exe_dir() -> Option<PathBuf> {
     exe.parent().map(Path::to_path_buf)
 }
 
+fn set_mode(path: &Path, mode: u32) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    }
+    #[cfg(not(unix))]
+    let _ = (path, mode);
+}
+
 pub fn mkdir_755(path: &Path) -> Result<()> {
     fs::create_dir_all(path).with_context(|| format!("mkdir {}", path.display()))?;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o755));
+    set_mode(path, 0o755);
     Ok(())
 }
 
@@ -173,7 +183,7 @@ pub fn write_mode(path: &Path, contents: impl AsRef<[u8]>, mode: u32) -> Result<
         mkdir_755(parent)?;
     }
     fs::write(path, contents.as_ref()).with_context(|| format!("write {}", path.display()))?;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    set_mode(path, mode);
     Ok(())
 }
 
@@ -269,31 +279,90 @@ pub fn last_failure_line(path: &Path) -> String {
         .to_string()
 }
 
-/// `YYYY-MM-DDTHH:MM:SS±HHMM` in the local timezone.
+/// `YYYY-MM-DDTHH:MM:SS±HHMM` in the local timezone (UTC on Windows).
 pub fn local_stamp() -> String {
-    unsafe {
-        let mut t: libc::time_t = 0;
-        libc::time(&mut t);
-        let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
-        if libc::localtime_r(&t, tm.as_mut_ptr()).is_null() {
-            return "1970-01-01T00:00:00+0000".into();
+    #[cfg(unix)]
+    {
+        unsafe {
+            let mut t: libc::time_t = 0;
+            libc::time(&mut t);
+            let mut tm = std::mem::MaybeUninit::<libc::tm>::uninit();
+            if libc::localtime_r(&t, tm.as_mut_ptr()).is_null() {
+                return "1970-01-01T00:00:00+0000".into();
+            }
+            let tm = tm.assume_init();
+            let off = tm.tm_gmtoff;
+            let sign = if off >= 0 { '+' } else { '-' };
+            let abs = off.unsigned_abs();
+            let oh = abs / 3600;
+            let om = (abs % 3600) / 60;
+            return format!(
+                "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{sign}{oh:02}{om:02}",
+                tm.tm_year + 1900,
+                tm.tm_mon + 1,
+                tm.tm_mday,
+                tm.tm_hour,
+                tm.tm_min,
+                tm.tm_sec,
+            );
         }
-        let tm = tm.assume_init();
-        let off = tm.tm_gmtoff;
-        let sign = if off >= 0 { '+' } else { '-' };
-        let abs = off.unsigned_abs();
-        let oh = abs / 3600;
-        let om = (abs % 3600) / 60;
-        format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}{sign}{oh:02}{om:02}",
-            tm.tm_year + 1900,
-            tm.tm_mon + 1,
-            tm.tm_mday,
-            tm.tm_hour,
-            tm.tm_min,
-            tm.tm_sec,
-        )
     }
+    #[cfg(not(unix))]
+    utc_stamp()
+}
+
+#[cfg(not(unix))]
+fn utc_stamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let days = secs / 86400;
+    let rem = secs % 86400;
+    let h = rem / 3600;
+    let m = (rem % 3600) / 60;
+    let s = rem % 60;
+    let (y, mo, da) = unix_days_to_ymd(days);
+    format!("{y:04}-{mo:02}-{da:02}T{h:02}:{m:02}:{s:02}+0000")
+}
+
+#[cfg(not(unix))]
+fn unix_days_to_ymd(mut days: u64) -> (i32, u32, u32) {
+    let mut y = 1970i32;
+    loop {
+        let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+        let diy = if leap { 366 } else { 365 };
+        if days < diy {
+            break;
+        }
+        days -= diy;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let mdays = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut mo = 1u32;
+    for &len in &mdays {
+        if days < len as u64 {
+            return (y, mo, days as u32 + 1);
+        }
+        days -= len as u64;
+        mo += 1;
+    }
+    (y, 12, 31)
 }
 
 #[cfg(test)]

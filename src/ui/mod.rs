@@ -17,8 +17,8 @@ use crate::paths::Paths;
 use crate::prune::prune_orphan_state;
 use crate::tunnel::{self, setup_error_hint, setup_has_error, setup_listening, setup_on};
 use crate::ui::forms::{
-    action_items, apply_field, backspace_at_cursor, delete_at_cursor, edit_menu_items, field_current,
-    field_hint, field_title, insert_at_cursor, render_with_cursor, MenuItem,
+    action_items, apply_field, backspace_at_cursor, delete_at_cursor, edit_menu_items,
+    field_current, field_hint, field_title, insert_at_cursor, render_with_cursor, MenuItem,
 };
 use crate::ui::list::Row;
 
@@ -148,7 +148,8 @@ impl App {
             self.status.push_str("   ");
             self.status.push_str(first);
             if failing.len() > 1 {
-                self.status.push_str(&format!(" (+{} more)", failing.len() - 1));
+                self.status
+                    .push_str(&format!(" (+{} more)", failing.len() - 1));
             }
         }
         if !self.filter_editing {
@@ -651,7 +652,10 @@ fn fill_bar(frame: &mut Frame, area: Rect, text: &str, style: ratatui::style::St
     let width = area.width as usize;
     let mut line = text.to_string();
     if line.chars().count() < width {
-        line.extend(std::iter::repeat_n(' ', width.saturating_sub(line.chars().count())));
+        line.extend(std::iter::repeat_n(
+            ' ',
+            width.saturating_sub(line.chars().count()),
+        ));
     }
     Line::from(Span::styled(line, style)).render(area, frame.buffer_mut());
 }
