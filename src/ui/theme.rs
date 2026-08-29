@@ -2,21 +2,24 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 
+/// ANSI 16-color only. RGB / 256-index colors are ignored on the Linux
+/// console (and other 16-color ttys), which leaves black-on-black bars.
 pub const FG: Color = Color::White;
-pub const FG_MUTED: Color = Color::Rgb(211, 211, 211);
-pub const FG_DARK: Color = Color::Indexed(16);
+pub const FG_MUTED: Color = Color::Gray;
+pub const FG_DARK: Color = Color::Black;
 pub const BG_LIGHT: Color = Color::White;
-pub const BG_CHROME: Color = Color::Cyan;
+/// Bright cyan (ANSI 14) — the closest 16-color “light blue”.
+pub const BG_HEADER: Color = Color::LightCyan;
 
 pub fn header() -> Style {
     Style::default()
-        .fg(Color::White)
-        .bg(BG_CHROME)
+        .fg(Color::Black)
+        .bg(BG_HEADER)
         .add_modifier(Modifier::BOLD)
 }
 
 pub fn footer() -> Style {
-    Style::default().fg(FG_DARK).bg(BG_CHROME)
+    Style::default().fg(Color::Black).bg(BG_HEADER)
 }
 
 pub fn selected() -> Style {
