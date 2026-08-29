@@ -6,9 +6,11 @@ mod windows;
 
 use std::path::Path;
 
+#[cfg(windows)]
+pub use parse::parse_netstat_listen_table;
 pub use parse::parse_netstat_tlnp;
 #[cfg(unix)]
-pub use parse::{parse_proc_net_listen, parse_ss_lntp};
+pub use parse::{parse_proc_net_listen, parse_proc_net_listen_ext, parse_ss_lntp};
 #[cfg(unix)]
 pub use unix::*;
 #[cfg(windows)]
@@ -21,6 +23,12 @@ pub struct OsProc {
     pub name: String,
     pub parent: String,
     pub cmd: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListenPort {
+    pub port: String,
+    pub loopback: bool,
 }
 
 pub fn basename(path: &str) -> String {

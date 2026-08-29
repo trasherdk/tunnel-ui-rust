@@ -222,6 +222,28 @@ pub fn detect_others(paths: &Paths, known: &[Config]) -> Vec<DetectedTunnel> {
         .collect();
 
     let procs = proc::unix_ssh_procs();
+    let rows = proc::process_rows();
+    let mut ppid_of = HashMap::new();
+    let mut names = HashMap::new();
+    for (pid, ppid, name) in &rows {
+        ppid_of.insert(*pid, *ppid);
+        names.insert(*pid, name.clone());
+    }
+    let mut listen_pids = Vec::new();
+    for p in &procs {
+        listen_pids.push(p.pid);
+        if let Some(root) = top_editor_ancestor(p.ppid, &ppid_of, &names) {
+            for (pid, _, name) in &rows {
+                if is_editor_process_name(name) && is_under(*pid, root, &ppid_of) {
+                    listen_pids.push(*pid);
+                }
+            }
+        }
+    }
+    listen_pids.sort_unstable();
+    listen_pids.dedup();
+    let socks = proc::listen_ports_for_pids(&listen_pids);
+
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for p in procs {
@@ -235,8 +257,14 @@ pub fn detect_others(paths: &Paths, known: &[Config]) -> Vec<DetectedTunnel> {
         if !cmd.to_lowercase().contains("ssh") {
             continue;
         }
-        let ports = unique_caps(re_local_fwd().captures_iter(cmd));
+        let mut ports = unique_caps(re_local_fwd().captures_iter(cmd));
         let dyn_ports = unique_caps(re_dyn_fwd().captures_iter(cmd));
+        for extra in extra_listen_ports(p.pid, p.ppid, &dyn_ports, &ppid_of, &names, &rows, &socks)
+        {
+            if !ports.iter().any(|x| x == &extra) {
+                ports.push(extra);
+            }
+        }
         let mut all_claimed = !ports.is_empty();
         for port in &ports {
             if !claimed.get(port).copied().unwrap_or(false) {
@@ -269,6 +297,106 @@ pub fn detect_others(paths: &Paths, known: &[Config]) -> Vec<DetectedTunnel> {
         });
     }
     out
+}
+
+/// Cursor/VS Code Port Forward listens in the editor process, not ssh.exe.
+/// Also picks up ssh LocalForward sockets that never appear as `-L` on argv.
+fn extra_listen_ports(
+    ssh_pid: i32,
+    ssh_ppid: i32,
+    dyn_ports: &[String],
+    ppid_of: &HashMap<i32, i32>,
+    names: &HashMap<i32, String>,
+    rows: &[(i32, i32, String)],
+    socks: &HashMap<i32, Vec<proc::ListenPort>>,
+) -> Vec<String> {
+    let mut want = vec![ssh_pid];
+    if let Some(root) = top_editor_ancestor(ssh_ppid, ppid_of, names) {
+        for (pid, _, name) in rows {
+            if is_editor_process_name(name) && is_under(*pid, root, ppid_of) {
+                want.push(*pid);
+            }
+        }
+    }
+    let mut extra = Vec::new();
+    for pid in want {
+        let Some(ports) = socks.get(&pid) else {
+            continue;
+        };
+        let editor = pid != ssh_pid;
+        for lp in ports {
+            if dyn_ports.iter().any(|d| d == &lp.port) {
+                continue;
+            }
+            if extra.iter().any(|e| e == &lp.port) {
+                continue;
+            }
+            if editor {
+                if !lp.loopback {
+                    continue;
+                }
+                if lp.port.parse::<u16>().ok().is_some_and(|p| p >= 49152) {
+                    continue;
+                }
+            }
+            extra.push(lp.port.clone());
+        }
+    }
+    extra
+}
+
+pub(crate) fn is_editor_process_name(name: &str) -> bool {
+    let base = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .to_lowercase();
+    let n = base.strip_suffix(".exe").unwrap_or(&base);
+    n == "cursor"
+        || n.starts_with("cursor helper")
+        || n == "code"
+        || n.starts_with("code helper")
+        || n.starts_with("code -")
+}
+
+fn top_editor_ancestor(
+    start: i32,
+    ppid_of: &HashMap<i32, i32>,
+    names: &HashMap<i32, String>,
+) -> Option<i32> {
+    let mut cur = start;
+    let mut found = None;
+    for _ in 0..64 {
+        if cur <= 0 {
+            break;
+        }
+        if names.get(&cur).is_some_and(|n| is_editor_process_name(n)) {
+            found = Some(cur);
+        }
+        let Some(&next) = ppid_of.get(&cur) else {
+            break;
+        };
+        if next == cur {
+            break;
+        }
+        cur = next;
+    }
+    found
+}
+
+fn is_under(pid: i32, root: i32, ppid_of: &HashMap<i32, i32>) -> bool {
+    let mut cur = pid;
+    let mut guard = HashSet::new();
+    for _ in 0..64 {
+        if cur == root {
+            return true;
+        }
+        if cur <= 0 || !guard.insert(cur) {
+            return false;
+        }
+        cur = ppid_of.get(&cur).copied().unwrap_or(0);
+    }
+    false
 }
 
 #[cfg(test)]
@@ -332,5 +460,94 @@ mod tests {
             "asus-test-root-3306",
             "asus-test-root"
         ));
+    }
+
+    #[test]
+    fn editor_process_names() {
+        assert!(is_editor_process_name("Cursor.exe"));
+        assert!(is_editor_process_name(
+            r"C:\Users\x\AppData\Local\Programs\cursor\Cursor.exe"
+        ));
+        assert!(is_editor_process_name("Cursor Helper (Plugin).exe"));
+        assert!(is_editor_process_name("Code.exe"));
+        assert!(is_editor_process_name("Code - Insiders.exe"));
+        assert!(is_editor_process_name("Code Helper (GPU).exe"));
+        assert!(!is_editor_process_name("ssh.exe"));
+        assert!(!is_editor_process_name("chrome.exe"));
+    }
+
+    #[test]
+    fn editor_tree_picks_cursor_instance() {
+        let mut ppid = HashMap::new();
+        let mut names = HashMap::new();
+        ppid.insert(10, 1);
+        names.insert(10, "Cursor.exe".into());
+        ppid.insert(11, 10);
+        names.insert(11, "Cursor.exe".into());
+        ppid.insert(12, 11);
+        names.insert(12, "ssh.exe".into());
+        ppid.insert(20, 1);
+        names.insert(20, "Cursor.exe".into());
+        ppid.insert(21, 20);
+        names.insert(21, "ssh.exe".into());
+        assert_eq!(top_editor_ancestor(11, &ppid, &names), Some(10));
+        assert!(is_under(11, 10, &ppid));
+        assert!(!is_under(20, 10, &ppid));
+        assert_eq!(top_editor_ancestor(20, &ppid, &names), Some(20));
+    }
+
+    #[test]
+    fn classify_keeps_remote_ssh_when_local_forward_present() {
+        let (kind, label) = classify_ssh(
+            "ssh -T -D 6490 host",
+            "cursor.exe",
+            &["5173".into()],
+            &["6490".into()],
+        );
+        assert_eq!(kind, "remote-ssh");
+        assert!(label.contains("6490"));
+        let detail = summarize_detected("ssh -T -D 6490 host", &["5173".into()], &["6490".into()]);
+        assert!(detail.contains("5173"), "{detail}");
+        assert!(detail.contains("6490"), "{detail}");
+    }
+
+    #[test]
+    fn extra_listen_includes_cursor_5173_not_other_instance() {
+        let mut ppid = HashMap::new();
+        let mut names = HashMap::new();
+        let rows: Vec<(i32, i32, String)> = vec![
+            (10, 1, "Cursor.exe".into()),
+            (11, 10, "Cursor.exe".into()),
+            (12, 11, "ssh.exe".into()),
+            (20, 1, "Cursor.exe".into()),
+        ];
+        for (pid, parent, name) in &rows {
+            ppid.insert(*pid, *parent);
+            names.insert(*pid, name.clone());
+        }
+        let mut socks = HashMap::new();
+        socks.insert(
+            12,
+            vec![proc::ListenPort {
+                port: "6490".into(),
+                loopback: true,
+            }],
+        );
+        socks.insert(
+            11,
+            vec![proc::ListenPort {
+                port: "5173".into(),
+                loopback: true,
+            }],
+        );
+        socks.insert(
+            20,
+            vec![proc::ListenPort {
+                port: "3000".into(),
+                loopback: true,
+            }],
+        );
+        let extra = extra_listen_ports(12, 11, &["6490".into()], &ppid, &names, &rows, &socks);
+        assert_eq!(extra, vec!["5173".to_string()]);
     }
 }

@@ -7,7 +7,10 @@ use std::time::{Duration, Instant};
 
 use libc::{self, pid_t};
 
-use super::{basename, parse_netstat_tlnp, parse_proc_net_listen, parse_ss_lntp};
+use super::{
+    basename, parse_netstat_tlnp, parse_proc_net_listen, parse_proc_net_listen_ext, parse_ss_lntp,
+    ListenPort,
+};
 
 /// `kill(pid, 0)`: ESRCH → dead, EPERM → alive.
 pub fn pid_alive(pid: i32) -> bool {
@@ -105,6 +108,70 @@ pub fn list_numeric_pids() -> Vec<i32> {
         }
     }
     pids
+}
+
+pub fn process_rows() -> Vec<(i32, i32, String)> {
+    list_numeric_pids()
+        .into_iter()
+        .map(|pid| {
+            let name = fs::read_to_string(format!("/proc/{pid}/comm"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            (pid, ppid_of(pid), name)
+        })
+        .collect()
+}
+
+pub fn listen_ports_for_pids(pids: &[i32]) -> HashMap<i32, Vec<ListenPort>> {
+    let want: HashSet<i32> = pids.iter().copied().filter(|p| *p > 0).collect();
+    if want.is_empty() {
+        return HashMap::new();
+    }
+    let mut inodes: HashMap<u64, (u16, bool)> = HashMap::new();
+    for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        if let Ok(text) = fs::read_to_string(path) {
+            for (port, ino, loopback) in parse_proc_net_listen_ext(&text) {
+                inodes.insert(ino, (port, loopback));
+            }
+        }
+    }
+    if inodes.is_empty() {
+        return HashMap::new();
+    }
+    let mut out: HashMap<i32, Vec<ListenPort>> = HashMap::new();
+    for pid in want {
+        let fd_dir = format!("/proc/{pid}/fd");
+        let Ok(rd) = fs::read_dir(&fd_dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let Ok(target) = fs::read_link(e.path()) else {
+                continue;
+            };
+            let s = target.to_string_lossy();
+            let Some(rest) = s.strip_prefix("socket:[") else {
+                continue;
+            };
+            let Some(num) = rest.strip_suffix(']') else {
+                continue;
+            };
+            let Ok(ino) = num.parse::<u64>() else {
+                continue;
+            };
+            let Some((port, loopback)) = inodes.get(&ino) else {
+                continue;
+            };
+            let row = ListenPort {
+                port: port.to_string(),
+                loopback: *loopback,
+            };
+            let list = out.entry(pid).or_default();
+            if !list.iter().any(|p| p.port == row.port) {
+                list.push(row);
+            }
+        }
+    }
+    out
 }
 
 pub fn unix_ssh_procs() -> Vec<super::OsProc> {

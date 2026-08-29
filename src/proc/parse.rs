@@ -1,6 +1,15 @@
 /// Parse `/proc/net/tcp` / `tcp6` listen rows into (local_port, inode).
 #[cfg_attr(not(unix), allow(dead_code))]
 pub fn parse_proc_net_listen(text: &str) -> Vec<(u16, u64)> {
+    parse_proc_net_listen_ext(text)
+        .into_iter()
+        .map(|(port, ino, _)| (port, ino))
+        .collect()
+}
+
+/// Listen rows: (local_port, inode, loopback).
+#[cfg_attr(not(unix), allow(dead_code))]
+pub fn parse_proc_net_listen_ext(text: &str) -> Vec<(u16, u64, bool)> {
     let mut out = Vec::new();
     for line in text.lines().skip(1) {
         let fields: Vec<&str> = line.split_whitespace().collect();
@@ -10,7 +19,7 @@ pub fn parse_proc_net_listen(text: &str) -> Vec<(u16, u64)> {
         if fields[3] != "0A" {
             continue;
         }
-        let Some((_, port_hex)) = fields[1].rsplit_once(':') else {
+        let Some((addr_hex, port_hex)) = fields[1].rsplit_once(':') else {
             continue;
         };
         let Ok(port) = u16::from_str_radix(port_hex, 16) else {
@@ -20,10 +29,17 @@ pub fn parse_proc_net_listen(text: &str) -> Vec<(u16, u64)> {
             continue;
         };
         if inode > 0 {
-            out.push((port, inode));
+            out.push((port, inode, local_hex_is_loopback(addr_hex)));
         }
     }
     out
+}
+
+fn local_hex_is_loopback(addr_hex: &str) -> bool {
+    let h = addr_hex.to_ascii_uppercase();
+    h == "0100007F"
+        || h == "00000000000000000000000001000000"
+        || h == "0000000000000000FFFF00000100007F"
 }
 
 #[cfg_attr(not(unix), allow(dead_code))]
@@ -90,6 +106,47 @@ pub fn parse_netstat_tlnp(text: &str, port: &str) -> Vec<i32> {
     pids
 }
 
+/// Windows `netstat -ano` LISTENING rows → (port, pid).
+pub fn parse_netstat_listen_table(text: &str) -> Vec<(String, i32)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let listen_idx = fields.iter().position(|f| {
+            let u = f.to_uppercase();
+            u == "LISTEN" || u == "LISTENING"
+        });
+        let Some(listen_idx) = listen_idx else {
+            continue;
+        };
+        if listen_idx < 2 {
+            continue;
+        }
+        let local = fields[listen_idx - 2];
+        let Some(p) = local
+            .rsplit_once(':')
+            .or_else(|| local.rsplit_once('.'))
+            .map(|(_, p)| p.trim())
+        else {
+            continue;
+        };
+        if p.is_empty() || p.parse::<u16>().ok().filter(|n| *n > 0).is_none() {
+            continue;
+        }
+        let tok = fields.last().copied().unwrap_or("");
+        let pid = if let Ok(n) = tok.parse::<i32>() {
+            n
+        } else if let Some((n, _)) = tok.split_once('/') {
+            n.parse().unwrap_or(0)
+        } else {
+            0
+        };
+        if pid > 0 {
+            out.push((p.to_string(), pid));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +164,11 @@ mod tests {
         assert!(rows.contains(&(3306, 12345)), "got {rows:?}");
         assert!(rows.contains(&(80, 99)));
         assert!(!rows.iter().any(|(p, i)| *p == 3306 && *i == 77));
+        let ext = parse_proc_net_listen_ext(SAMPLE_TCP);
+        assert!(ext
+            .iter()
+            .any(|(p, i, lb)| *p == 3306 && *i == 12345 && *lb));
+        assert!(ext.iter().any(|(p, _, lb)| *p == 80 && !*lb));
     }
 
     #[test]
@@ -117,5 +179,12 @@ mod tests {
         assert_eq!(parse_netstat_tlnp(ns, "3306"), vec![4242]);
         let win = "TCP    127.0.0.1:3306    0.0.0.0:0    LISTENING    4242";
         assert_eq!(parse_netstat_tlnp(win, "3306"), vec![4242]);
+        let table = parse_netstat_listen_table(
+            "TCP    127.0.0.1:5173    0.0.0.0:0    LISTENING    88\n\
+             TCP    [::1]:5173         [::]:0        LISTENING    88\n\
+             TCP    0.0.0.0:445        0.0.0.0:0    LISTENING    4\n",
+        );
+        assert!(table.contains(&("5173".into(), 88)), "got {table:?}");
+        assert!(table.contains(&("445".into(), 4)));
     }
 }
