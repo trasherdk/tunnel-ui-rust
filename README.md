@@ -22,16 +22,24 @@ Pushing a version tag (`v0.1.0`, `v1.2.3`, …) runs GitHub Actions and attaches
 
 | File | What it is |
 | --- | --- |
-| `tunnel-ui-linux-x86_64` | Statically linked Linux binary (musl) |
-| `tunnel-ui.exe` | Windows 64-bit executable (icon + GUI subsystem, same as the Go build) |
+| `tunnel-ui` | Statically linked Linux binary (musl, x86_64, already executable) |
+| `tunnel-ui-<ver>-x86_64-1.txz` | Slackware package (`installpkg`; binary in `/usr/local/bin`) |
+| `tunnel-ui.exe` | Portable Windows 64-bit executable |
+| `tunnel-ui-<ver>-setup.exe` | Per-user Windows installer (Start Menu, optional Desktop icon, uninstaller) |
 
-On Windows, after you put `tunnel-ui.exe` somewhere permanent (for example `%USERPROFILE%\.tunnel-ui\tunnel-ui.exe`), run:
+Slackware:
 
-```text
-tunnel-ui shortcut
+```bash
+# fresh install
+installpkg tunnel-ui-0.1.0-x86_64-1.txz
+# install or replace an existing package
+upgradepkg --install-new tunnel-ui-0.1.0-x86_64-1.txz
+removepkg tunnel-ui
 ```
 
-That creates **SSH tunnels.lnk** on the Desktop and in the Start Menu, using the exe icon, working directory `%USERPROFILE%\.tunnel-ui`, and AppUserModelID `dk.fumlersoft.tunnel-ui` so you can pin it. Double-clicking the shortcut opens its own console titled **SSH tunnels**.
+Windows: run `tunnel-ui-<ver>-setup.exe`. It installs under `%LOCALAPPDATA%\Programs\tunnel-ui` and does not need Administrator. Configs still live in `%USERPROFILE%\.tunnel-ui` (same as an installed Linux binary using `~/.tunnel-ui`).
+
+You can still drop `tunnel-ui.exe` somewhere yourself if you do not want the installer.
 
 Cut a release after bumping `[package].version` in `Cargo.toml`:
 
@@ -53,14 +61,18 @@ The binary is `target/release/tunnel-ui` (Linux) or `target/release/tunnel-ui.ex
 
 Version is `[package].version` in `Cargo.toml`. Print it with `tunnel-ui -v` or `tunnel-ui --version`. Bump that field when you cut a release.
 
-`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed copy uses `~/.tunnel-ui` on Linux and `%USERPROFILE%\.tunnel-ui` on Windows. `TUNNEL_HOME` overrides either.
+`cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed copy (`/usr/local/bin`, the Windows installer, or any other non-`target` path) uses `~/.tunnel-ui` on Linux and `%USERPROFILE%\.tunnel-ui` on Windows. `TUNNEL_HOME` overrides either.
 
 ```bash
 # run from the crate root so repo configs/ resolve
 ./target/release/tunnel-ui
 
-# install; data goes to ~/.tunnel-ui
-install -m 755 target/release/tunnel-ui /usr/local/bin/tunnel-ui
+# Slackware package from a built binary
+./packaging/slackware/build-txz.sh target/release/tunnel-ui 0.1.0 dist
+# fresh install:
+installpkg dist/tunnel-ui-0.1.0-$(uname -m)-1.txz
+# install or replace an existing package:
+upgradepkg --install-new dist/tunnel-ui-0.1.0-$(uname -m)-1.txz
 ```
 
 ## Keys

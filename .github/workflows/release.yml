@@ -24,15 +24,19 @@ jobs:
         run: cargo build --release --locked --target x86_64-unknown-linux-musl
       - name: Package
         run: |
+          VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          cp target/x86_64-unknown-linux-musl/release/tunnel-ui dist/tunnel-ui-linux-x86_64
-          chmod +x dist/tunnel-ui-linux-x86_64
-          file dist/tunnel-ui-linux-x86_64
-          ldd dist/tunnel-ui-linux-x86_64 || true
+          install -m 755 target/x86_64-unknown-linux-musl/release/tunnel-ui dist/tunnel-ui
+          chmod +x packaging/slackware/build-txz.sh
+          file dist/tunnel-ui
+          ldd dist/tunnel-ui || true
+          ./packaging/slackware/build-txz.sh dist/tunnel-ui "$VERSION" dist
       - uses: actions/upload-artifact@v7
         with:
           name: linux-x86_64
-          path: dist/tunnel-ui-linux-x86_64
+          path: |
+            dist/tunnel-ui
+            dist/tunnel-ui-*-x86_64-*.txz
 
   windows:
     runs-on: windows-latest
@@ -45,15 +49,28 @@ jobs:
         run: cargo test --locked
       - name: Build Windows exe
         run: cargo build --release --locked --target x86_64-pc-windows-msvc
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
       - name: Package
         shell: pwsh
         run: |
+          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/x86_64-pc-windows-msvc/release/tunnel-ui.exe dist/tunnel-ui.exe
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
+          & $iscc `
+            "/DMyAppVersion=$ver" `
+            "/DBinDir=$pwd\target\x86_64-pc-windows-msvc\release" `
+            "/DOutputDir=$pwd\dist" `
+            "$pwd\packaging\windows\tunnel-ui.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
-          path: dist/tunnel-ui.exe
+          path: |
+            dist/tunnel-ui.exe
+            dist/tunnel-ui-*-setup.exe
 
   release:
     needs: [linux, windows]
@@ -65,7 +82,10 @@ jobs:
       - name: Flatten artifacts
         run: |
           mkdir -p dist
-          find artifacts -type f -exec cp {} dist/ \;
+          find artifacts -type f -exec cp -a {} dist/ \;
+          if [ -f dist/tunnel-ui ]; then
+            chmod 755 dist/tunnel-ui
+          fi
           ls -la dist
       - uses: softprops/action-gh-release@v3
         with:

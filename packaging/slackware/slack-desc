@@ -1,0 +1,19 @@
+# HOW TO EDIT THIS FILE:
+# The "handy ruler" below makes it easier to edit a package description.
+# Line up the first '|' above the ':' following the base package name, and
+# the '|' on the right side marks the last column you can put a character in.
+# You must make exactly 11 lines for the formatting to be correct.  It's also
+# customary to leave one space after the ':' except on otherwise blank lines.
+
+         |-----handy-ruler------------------------------------------------------|
+tunnel-ui: tunnel-ui (SSH local-forward TUI)
+tunnel-ui:
+tunnel-ui: Terminal UI and CLI for SSH local port forwards. Save setups,
+tunnel-ui: start and stop them, and reconnect when the session drops.
+tunnel-ui:
+tunnel-ui: Requires the OpenSSH client (ssh). Configs and state live in
+tunnel-ui: ~/.tunnel-ui. This package is a static x86_64 musl binary.
+tunnel-ui:
+tunnel-ui: Homepage: https://github.com/trasherdk/tunnel-ui-rust
+tunnel-ui:
+tunnel-ui:
