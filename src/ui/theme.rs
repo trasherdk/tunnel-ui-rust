@@ -10,7 +10,7 @@ pub const BG_CHROME: Color = Color::Cyan;
 
 pub fn header() -> Style {
     Style::default()
-        .fg(FG_DARK)
+        .fg(Color::White)
         .bg(BG_CHROME)
         .add_modifier(Modifier::BOLD)
 }
@@ -48,6 +48,23 @@ pub fn desc() -> Style {
 
 pub fn status() -> Style {
     Style::default().fg(FG).bg(Color::Black)
+}
+
+pub fn state_on(selected: bool) -> Style {
+    state_color(Color::Green, selected)
+}
+
+pub fn state_off(selected: bool) -> Style {
+    state_color(Color::Red, selected)
+}
+
+pub fn state_err(selected: bool) -> Style {
+    state_color(Color::Yellow, selected)
+}
+
+fn state_color(fg: Color, selected: bool) -> Style {
+    let bg = if selected { BG_LIGHT } else { Color::Black };
+    Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD)
 }
 
 pub const LIST_KEYS: &str = "enter actions   n new   r refresh   / filter   q quit";

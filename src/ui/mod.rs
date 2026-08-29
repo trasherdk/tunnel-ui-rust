@@ -666,9 +666,15 @@ fn inset(area: Rect, dy: u16, dx: u16) -> Rect {
 }
 
 fn render_list(app: &mut App, frame: &mut Frame, area: Rect) {
+    let list_area = Rect {
+        x: area.x,
+        y: area.y.saturating_add(1),
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
     let vis = app.visible_rows();
-    list::ensure_visible(&vis, app.selected, area.height, &mut app.scroll);
-    list::render_rows(frame, area, &vis, app.selected, app.scroll);
+    list::ensure_visible(&vis, app.selected, list_area.height, &mut app.scroll);
+    list::render_rows(frame, list_area, &vis, app.selected, app.scroll);
 }
 
 fn render_menu(frame: &mut Frame, area: Rect, items: &[MenuItem], selected: usize, hint: &str) {

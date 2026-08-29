@@ -148,13 +148,55 @@ pub fn render_rows(frame: &mut Frame, area: Rect, rows: &[Row], selected: usize,
                 height: 1,
             };
             theme::paint_fill(frame.buffer_mut(), line_area, style);
-            Line::from(Span::styled(format!(" {text}"), style))
-                .render(line_area, frame.buffer_mut());
+            if li == 0 {
+                render_title(frame, line_area, row, sel);
+            } else {
+                Line::from(Span::styled(format!(" {text}"), style))
+                    .render(line_area, frame.buffer_mut());
+            }
             y = y.saturating_add(1);
         }
         idx += 1;
         if y >= bottom {
             return;
+        }
+    }
+}
+
+fn render_title(frame: &mut Frame, area: Rect, row: &Row, selected: bool) {
+    match row {
+        Row::Known {
+            config,
+            listening,
+            failed,
+            ..
+        } => {
+            let state = Row::known_state(*listening, *failed);
+            let rest = if selected {
+                theme::selected()
+            } else {
+                theme::title()
+            };
+            let badge = match state {
+                "on" => theme::state_on(selected),
+                "off" => theme::state_off(selected),
+                _ => theme::state_err(selected),
+            };
+            Line::from(vec![
+                Span::styled(" [", rest),
+                Span::styled(state, badge),
+                Span::styled("]  ", rest),
+                Span::styled(config.name.as_str(), rest),
+            ])
+            .render(area, frame.buffer_mut());
+        }
+        Row::Detected(d) => {
+            let style = if selected {
+                theme::selected()
+            } else {
+                theme::title()
+            };
+            Line::from(Span::styled(format!(" {}", d.label), style)).render(area, frame.buffer_mut());
         }
     }
 }
