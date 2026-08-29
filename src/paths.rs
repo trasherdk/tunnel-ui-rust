@@ -114,11 +114,7 @@ fn home_dir() -> Option<PathBuf> {
 /// app root (`configs/` and `.state/` go under it).
 fn read_tunnel_home_file(exe_dir: &Path) -> Option<PathBuf> {
     let raw = fs::read_to_string(exe_dir.join("tunnel-home")).ok()?;
-    let line = raw
-        .lines()
-        .next()?
-        .trim()
-        .trim_start_matches('\u{feff}');
+    let line = raw.lines().next()?.trim().trim_start_matches('\u{feff}');
     if line.is_empty() {
         None
     } else {

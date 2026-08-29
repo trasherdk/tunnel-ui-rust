@@ -7,6 +7,15 @@ pub fn prepare_console(mode: &str) {
     let _ = mode;
 }
 
+/// Crossterm raw mode enables `ENABLE_VIRTUAL_TERMINAL_INPUT`, which makes
+/// Windows deliver arrows/Esc as CSI bytes. Crossterm's Windows reader uses
+/// `ReadConsoleInput` and `VK_*` codes, so those keys are dropped. Clear VT
+/// input after `ratatui::init()`.
+pub fn apply_tui_console_mode() {
+    #[cfg(windows)]
+    windows_impl::apply_tui_mode();
+}
+
 #[cfg(windows)]
 mod windows_impl {
     use std::fs::{File, OpenOptions};
@@ -16,9 +25,10 @@ mod windows_impl {
     use windows::core::w;
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::Console::{
-        AllocConsole, AttachConsole, GetConsoleMode, GetConsoleWindow, SetConsoleCP,
+        AllocConsole, AttachConsole, GetConsoleMode, GetConsoleWindow, GetStdHandle, SetConsoleCP,
         SetConsoleMode, SetConsoleOutputCP, SetConsoleTitleW, SetStdHandle, ATTACH_PARENT_PROCESS,
-        CONSOLE_MODE, DISABLE_NEWLINE_AUTO_RETURN, ENABLE_EXTENDED_FLAGS, ENABLE_PROCESSED_OUTPUT,
+        CONSOLE_MODE, DISABLE_NEWLINE_AUTO_RETURN, ENABLE_ECHO_INPUT, ENABLE_EXTENDED_FLAGS,
+        ENABLE_LINE_INPUT, ENABLE_MOUSE_INPUT, ENABLE_PROCESSED_INPUT, ENABLE_PROCESSED_OUTPUT,
         ENABLE_QUICK_EDIT_MODE, ENABLE_VIRTUAL_TERMINAL_INPUT, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
         ENABLE_WINDOW_INPUT, ENABLE_WRAP_AT_EOL_OUTPUT, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
         STD_OUTPUT_HANDLE,
@@ -43,12 +53,51 @@ mod windows_impl {
             }
         }
         bind_stdio();
-        enable_vt();
+        enable_output_vt();
         unsafe {
             let _ = SetConsoleCP(UTF8);
             let _ = SetConsoleOutputCP(UTF8);
             if mode == "tui" {
                 let _ = SetConsoleTitleW(w!("SSH tunnels"));
+            }
+        }
+    }
+
+    pub fn apply_tui_mode() {
+        unsafe {
+            if let Ok(h) = GetStdHandle(STD_INPUT_HANDLE) {
+                if !h.is_invalid() {
+                    let mut mode = CONSOLE_MODE(0);
+                    if GetConsoleMode(h, &mut mode).is_ok() {
+                        mode = CONSOLE_MODE(
+                            (mode.0
+                                | ENABLE_EXTENDED_FLAGS.0
+                                | ENABLE_WINDOW_INPUT.0
+                                | ENABLE_MOUSE_INPUT.0)
+                                & !(ENABLE_VIRTUAL_TERMINAL_INPUT.0
+                                    | ENABLE_QUICK_EDIT_MODE.0
+                                    | ENABLE_LINE_INPUT.0
+                                    | ENABLE_ECHO_INPUT.0
+                                    | ENABLE_PROCESSED_INPUT.0),
+                        );
+                        let _ = SetConsoleMode(h, mode);
+                    }
+                }
+            }
+            if let Ok(h) = GetStdHandle(STD_OUTPUT_HANDLE) {
+                if !h.is_invalid() {
+                    let mut mode = CONSOLE_MODE(0);
+                    if GetConsoleMode(h, &mut mode).is_ok() {
+                        mode = CONSOLE_MODE(
+                            (mode.0
+                                | ENABLE_PROCESSED_OUTPUT.0
+                                | ENABLE_VIRTUAL_TERMINAL_PROCESSING.0
+                                | DISABLE_NEWLINE_AUTO_RETURN.0)
+                                & !ENABLE_WRAP_AT_EOL_OUTPUT.0,
+                        );
+                        let _ = SetConsoleMode(h, mode);
+                    }
+                }
             }
         }
     }
@@ -79,33 +128,21 @@ mod windows_impl {
         let _ = CON_OUT.set(stdout);
     }
 
-    fn or_mode(mode: CONSOLE_MODE, flag: CONSOLE_MODE) -> CONSOLE_MODE {
-        CONSOLE_MODE(mode.0 | flag.0)
-    }
-
-    fn enable_vt() {
-        if let Some(f) = CON_IN.get() {
-            unsafe {
-                let h = raw_handle(f);
-                let mut mode = CONSOLE_MODE(0);
-                if GetConsoleMode(h, &mut mode).is_ok() {
-                    mode = or_mode(mode, ENABLE_VIRTUAL_TERMINAL_INPUT);
-                    mode = or_mode(mode, ENABLE_EXTENDED_FLAGS);
-                    mode = or_mode(mode, ENABLE_WINDOW_INPUT);
-                    mode = CONSOLE_MODE(mode.0 & !ENABLE_QUICK_EDIT_MODE.0);
-                    let _ = SetConsoleMode(h, mode);
+    fn enable_output_vt() {
+        unsafe {
+            if let Ok(h) = GetStdHandle(STD_OUTPUT_HANDLE) {
+                if h.is_invalid() {
+                    return;
                 }
-            }
-        }
-        if let Some(f) = CON_OUT.get() {
-            unsafe {
-                let h = raw_handle(f);
                 let mut mode = CONSOLE_MODE(0);
                 if GetConsoleMode(h, &mut mode).is_ok() {
-                    mode = or_mode(mode, ENABLE_PROCESSED_OUTPUT);
-                    mode = or_mode(mode, ENABLE_WRAP_AT_EOL_OUTPUT);
-                    mode = or_mode(mode, ENABLE_VIRTUAL_TERMINAL_PROCESSING);
-                    mode = or_mode(mode, DISABLE_NEWLINE_AUTO_RETURN);
+                    mode = CONSOLE_MODE(
+                        (mode.0
+                            | ENABLE_PROCESSED_OUTPUT.0
+                            | ENABLE_VIRTUAL_TERMINAL_PROCESSING.0
+                            | DISABLE_NEWLINE_AUTO_RETURN.0)
+                            & !ENABLE_WRAP_AT_EOL_OUTPUT.0,
+                    );
                     let _ = SetConsoleMode(h, mode);
                 }
             }

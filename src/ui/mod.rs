@@ -2,10 +2,15 @@ mod forms;
 mod list;
 mod theme;
 
+use std::io::stdout;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::crossterm::execute;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, Wrap};
@@ -71,6 +76,7 @@ pub struct App {
     confirm_prompt: String,
     confirm_op: Option<ConfirmOp>,
     quit: bool,
+    term_area: Rect,
 }
 
 impl App {
@@ -98,6 +104,7 @@ impl App {
             confirm_prompt: String::new(),
             confirm_op: None,
             quit: false,
+            term_area: Rect::default(),
         };
         app.refresh();
         app
@@ -167,6 +174,7 @@ impl App {
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) {
+    // Windows sends Press + Release for the same key; ignore Release.
     if key.kind == KeyEventKind::Release {
         return;
     }
@@ -234,23 +242,163 @@ fn list_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up | KeyCode::Char('k') => {
             app.selected = app.selected.saturating_sub(1);
         }
-        KeyCode::Enter => {
-            let vis = app.visible_rows();
-            if let Some(row) = vis.get(app.selected) {
-                match row {
-                    Row::Known { config, .. } => {
-                        app.active_name = config.name.clone();
-                        app.action_idx = 0;
-                        app.screen = Screen::Actions;
-                    }
-                    Row::Detected(d) => {
-                        app.inspect = Some(d.clone());
-                        app.screen = Screen::Inspect;
-                    }
-                }
+        KeyCode::Enter => activate_list_row(app),
+        _ => {}
+    }
+}
+
+fn activate_list_row(app: &mut App) {
+    let vis = app.visible_rows();
+    if let Some(row) = vis.get(app.selected) {
+        match row {
+            Row::Known { config, .. } => {
+                app.active_name = config.name.clone();
+                app.action_idx = 0;
+                app.screen = Screen::Actions;
+            }
+            Row::Detected(d) => {
+                app.inspect = Some(d.clone());
+                app.screen = Screen::Inspect;
             }
         }
+    }
+}
+
+fn enter_key() -> KeyEvent {
+    KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+}
+
+fn has_status_bar(app: &App) -> bool {
+    !chrome_owned(app).1.is_empty()
+}
+
+fn body_rect(area: Rect, has_status: bool) -> Rect {
+    let constraints: Vec<Constraint> = if has_status {
+        vec![
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ]
+    } else {
+        vec![
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ]
+    };
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(area)[1]
+}
+
+fn list_hit_rect(body: Rect) -> Rect {
+    Rect {
+        x: body.x,
+        y: body.y.saturating_add(1),
+        width: body.width,
+        height: body.height.saturating_sub(1),
+    }
+}
+
+fn contains(area: Rect, col: u16, row: u16) -> bool {
+    col >= area.x
+        && col < area.x.saturating_add(area.width)
+        && row >= area.y
+        && row < area.y.saturating_add(area.height)
+}
+
+fn handle_mouse(app: &mut App, mouse: MouseEvent) {
+    match mouse.kind {
+        MouseEventKind::ScrollDown => {
+            if app.screen == Screen::List && !app.filter_editing {
+                list_key(app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if app.screen == Screen::List && !app.filter_editing {
+                list_key(app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+            }
+        }
+        MouseEventKind::Down(MouseButton::Left) => mouse_left_down(app, mouse.column, mouse.row),
         _ => {}
+    }
+}
+
+fn mouse_left_down(app: &mut App, col: u16, row: u16) {
+    let area = app.term_area;
+    if area.width == 0 {
+        return;
+    }
+    let body = body_rect(area, has_status_bar(app));
+    match app.screen {
+        Screen::List => {
+            if app.filter_editing {
+                app.filter_editing = false;
+            }
+            let hit = list_hit_rect(body);
+            if !contains(hit, col, row) {
+                return;
+            }
+            let vis = app.visible_rows();
+            let Some(i) = Row::index_at_y(&vis, app.scroll, row.saturating_sub(hit.y)) else {
+                return;
+            };
+            if i == app.selected {
+                activate_list_row(app);
+            } else {
+                app.selected = i;
+            }
+        }
+        Screen::Actions | Screen::EditMenu => {
+            let items_len = if app.screen == Screen::Actions {
+                action_items().len()
+            } else {
+                edit_menu_items(&app.edit, app.edit_name_locked).len()
+            };
+            let Some(i) = menu_index_at(body, col, row, items_len) else {
+                return;
+            };
+            let already = if app.screen == Screen::Actions {
+                i == app.action_idx
+            } else {
+                i == app.edit_idx
+            };
+            if app.screen == Screen::Actions {
+                app.action_idx = i;
+            } else {
+                app.edit_idx = i;
+            }
+            if already {
+                handle_key(app, enter_key());
+            }
+        }
+        Screen::Inspect | Screen::Result => {
+            handle_key(app, enter_key());
+        }
+        Screen::Confirm | Screen::Field => {}
+    }
+}
+
+fn menu_index_at(body: Rect, col: u16, row: u16, n: usize) -> Option<usize> {
+    let inner = inset(body, 1, 1);
+    if inner.height == 0 || n == 0 {
+        return None;
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(inner);
+    let list_area = chunks[1];
+    if !contains(list_area, col, row) {
+        return None;
+    }
+    let i = row.saturating_sub(list_area.y) as usize;
+    if i < n {
+        Some(i)
+    } else {
+        None
     }
 }
 
@@ -528,6 +676,7 @@ fn confirm_key(app: &mut App, key: KeyEvent) {
 
 fn render(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
+    app.term_area = area;
     let (title, status, keys) = chrome_owned(app);
     let has_status = !status.is_empty();
     let constraints = if has_status {
@@ -761,6 +910,8 @@ fn choice_line(sel: bool, label: &str) -> String {
 
 pub fn run(paths: Paths) -> Result<()> {
     let mut terminal = ratatui::init();
+    crate::console::apply_tui_console_mode();
+    execute!(stdout(), EnableMouseCapture)?;
     terminal.clear()?;
     let result = (|| {
         let mut app = App::new(paths);
@@ -774,6 +925,7 @@ pub fn run(paths: Paths) -> Result<()> {
             if event::poll(Duration::from_millis(200))? {
                 match event::read()? {
                     Event::Key(key) => handle_key(&mut app, key),
+                    Event::Mouse(mouse) => handle_mouse(&mut app, mouse),
                     Event::Resize(_, _) => {}
                     _ => {}
                 }
@@ -790,6 +942,7 @@ pub fn run(paths: Paths) -> Result<()> {
         }
         Ok(())
     })();
+    let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     println!();
     result

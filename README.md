@@ -41,12 +41,13 @@ Windows: run `tunnel-ui-<ver>-setup.exe`. It does not need Administrator. You pi
 
 A portable `tunnel-ui.exe` with no `tunnel-home` file uses `%USERPROFILE%\.tunnel-ui`.
 
-Cut a release after bumping `[package].version` in `Cargo.toml`:
+Cut a release from a clean tree:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+./scripts/release.sh patch    # or minor / major
 ```
+
+That bumps the version, commits, tags `vX.Y.Z`, and pushes. See `RELEASE.md`.
 
 ## Build
 

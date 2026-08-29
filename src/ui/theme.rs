@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 /// ANSI 16-color only. RGB / 256-index colors are ignored on the Linux
 /// console (and other 16-color ttys), which leaves black-on-black bars.
 pub const FG: Color = Color::White;
-pub const FG_MUTED: Color = Color::Gray;
+pub const FG_MUTED: Color = Color::White;
 pub const FG_DARK: Color = Color::Black;
 pub const BG_LIGHT: Color = Color::White;
 /// Bright cyan (ANSI 14) — the closest 16-color “light blue”.

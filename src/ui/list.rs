@@ -26,10 +26,25 @@ impl Row {
     }
 
     pub fn height(&self) -> u16 {
+        // Content lines plus one blank row between items.
         match self {
-            Row::Known { config, .. } if !config.comment_line().is_empty() => 3,
-            _ => 2,
+            Row::Known { config, .. } if !config.comment_line().is_empty() => 4,
+            _ => 3,
         }
+    }
+
+    /// Row index at a y offset within the list viewport (0 = top visible row).
+    pub fn index_at_y(rows: &[Row], scroll: u16, y: u16) -> Option<usize> {
+        let mut acc = 0u16;
+        let target = scroll.saturating_add(y);
+        for (i, row) in rows.iter().enumerate() {
+            let h = row.height();
+            if target < acc.saturating_add(h) {
+                return Some(i);
+            }
+            acc = acc.saturating_add(h);
+        }
+        None
     }
 
     fn known_state(listening: bool, failed: bool) -> &'static str {
@@ -157,6 +172,16 @@ pub fn render_rows(frame: &mut Frame, area: Rect, rows: &[Row], selected: usize,
             y = y.saturating_add(1);
         }
         idx += 1;
+        if y < bottom {
+            let gap = Rect {
+                x: area.x,
+                y,
+                width: area.width,
+                height: 1,
+            };
+            theme::paint_fill(frame.buffer_mut(), gap, theme::root());
+            y = y.saturating_add(1);
+        }
         if y >= bottom {
             return;
         }
@@ -226,5 +251,25 @@ pub fn ensure_visible(rows: &[Row], selected: usize, area_h: u16, scroll: &mut u
     let max_scroll = total_height(rows).saturating_sub(area_h);
     if *scroll > max_scroll {
         *scroll = max_scroll;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[test]
+    fn index_at_y_uses_row_heights() {
+        let row = Row::Known {
+            config: Config::default(),
+            listening: false,
+            failed: false,
+        };
+        let rows = vec![row.clone(), row];
+        assert_eq!(Row::index_at_y(&rows, 0, 0), Some(0));
+        assert_eq!(Row::index_at_y(&rows, 0, 2), Some(0));
+        assert_eq!(Row::index_at_y(&rows, 0, 3), Some(1));
+        assert_eq!(Row::index_at_y(&rows, 0, 99), None);
     }
 }
