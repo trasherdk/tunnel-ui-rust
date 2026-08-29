@@ -37,7 +37,7 @@ upgradepkg --install-new tunnel-ui-0.1.0-x86_64-1.txz
 removepkg tunnel-ui
 ```
 
-Windows: run `tunnel-ui-<ver>-setup.exe`. It does not need Administrator. You pick the install folder (default `%LOCALAPPDATA%\Programs\tunnel-ui`) and a **config/state folder** (default `data` under the install folder). The installer writes that path into `tunnel-home` next to `tunnel-ui.exe`. Uninstall does not delete your configs.
+Windows: run `tunnel-ui-<ver>-setup.exe`. It does not need Administrator. You pick the install folder (default `%LOCALAPPDATA%\Programs\tunnel-ui`) and a **config/state folder** (default `data` under the install folder). The installer writes that path into `tunnel-home` next to `tunnel-ui.exe`. Uninstall does not delete your configs. You can upgrade while tunnels are running; close the TUI window if it is open, but you do not need to stop SSH forwards.
 
 A portable `tunnel-ui.exe` with no `tunnel-home` file uses `%USERPROFILE%\.tunnel-ui`.
 

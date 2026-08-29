@@ -177,6 +177,37 @@ fn current_exe_dir() -> Option<PathBuf> {
     exe.parent().map(Path::to_path_buf)
 }
 
+pub fn is_replaced_exe_backup(exe_name: &str, file_name: &str) -> bool {
+    let old = format!("{exe_name}.old");
+    file_name == old || file_name.starts_with(&format!("{exe_name}.old."))
+}
+
+/// Drop leftover `tunnel-ui.exe.old*` from a Windows upgrade while supervisors
+/// were still running. Locked files are left in place.
+pub fn cleanup_replaced_exe() {
+    let Ok(exe) = env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    let Some(name) = exe.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let Ok(rd) = fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let fname = e.file_name();
+        let Some(n) = fname.to_str() else {
+            continue;
+        };
+        if is_replaced_exe_backup(name, n) {
+            let _ = fs::remove_file(e.path());
+        }
+    }
+}
+
 fn set_mode(path: &Path, mode: u32) {
     #[cfg(unix)]
     {
@@ -383,6 +414,14 @@ fn unix_days_to_ymd(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replaced_exe_backup_names() {
+        assert!(is_replaced_exe_backup("tunnel-ui.exe", "tunnel-ui.exe.old"));
+        assert!(is_replaced_exe_backup("tunnel-ui.exe", "tunnel-ui.exe.old.1"));
+        assert!(!is_replaced_exe_backup("tunnel-ui.exe", "tunnel-ui.exe"));
+        assert!(!is_replaced_exe_backup("tunnel-ui.exe", "notes.old"));
+    }
 
     #[test]
     fn tunnel_home_wins() {

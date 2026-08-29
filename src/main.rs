@@ -77,6 +77,8 @@ fn real_main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
+    crate::paths::cleanup_replaced_exe();
+
     if let Some(cmd) = args.first().map(String::as_str) {
         match cmd {
             "-h" | "--help" | "help" => {

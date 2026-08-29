@@ -34,6 +34,10 @@ WizardStyle=modern
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 MinVersion=10.0
+; Supervisors are the same tunnel-ui.exe. Do not ask Restart Manager to kill
+; them; PrepareToInstall renames the in-use file so the new binary can be written.
+CloseApplications=no
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -53,6 +57,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 
 [UninstallDelete]
 Type: files; Name: "{app}\tunnel-home"
+Type: files; Name: "{app}\{#MyAppExeName}.old*"
 
 [Code]
 var
@@ -105,6 +110,43 @@ begin
   Result := Trim(DataDirPage.Values[0]);
   if Result = '' then
     Result := ExpandConstant('{app}\data');
+end;
+
+function NextOldExeName(const Exe: String): String;
+var
+  N: Integer;
+begin
+  Result := Exe + '.old';
+  N := 1;
+  while FileExists(Result) do
+  begin
+    if DeleteFile(Result) then
+      Break;
+    Result := Exe + '.old.' + IntToStr(N);
+    N := N + 1;
+    if N > 20 then
+      Break;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Exe, Old: String;
+begin
+  Result := '';
+  NeedsRestart := False;
+  Exe := ExpandConstant('{app}\{#MyAppExeName}');
+  if not FileExists(Exe) then
+    Exit;
+  { Free to replace when the TUI is closed and no supervisor holds the file. }
+  if DeleteFile(Exe) then
+    Exit;
+  { Supervisors keep the renamed image; tunnels stay up. }
+  Old := NextOldExeName(Exe);
+  if FileExists(Old) then
+    DeleteFile(Old);
+  if FileExists(Old) or not RenameFile(Exe, Old) then
+    Result := 'Could not replace tunnel-ui.exe. Close the tunnel-ui window if it is open, then try again. Running SSH tunnels do not need to be stopped.';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
