@@ -14,9 +14,17 @@ use anyhow::Result;
 
 use crate::paths::Paths;
 
-fn usage() -> &'static str {
-    "\
-tunnel-ui — SSH local-forward TUI
+/// App version; keep in lockstep with `[package].version` in Cargo.toml.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn version_line() -> String {
+    format!("tunnel-ui {VERSION}")
+}
+
+fn usage() -> String {
+    format!(
+        "\
+tunnel-ui {VERSION} — SSH local-forward TUI
 
 Usage:
   tunnel-ui                 Start the terminal UI
@@ -24,10 +32,13 @@ Usage:
   tunnel-ui stop <name>     Stop a saved tunnel
   tunnel-ui status [name]   Show status
   tunnel-ui delete <name>   Stop and delete a saved tunnel
+  tunnel-ui -v | --version  Print version
+  tunnel-ui -h | --help     Show this help
   tunnel-ui shortcut        Windows-only (not available on Linux)
 
 Requires OpenSSH (ssh on PATH). Override the binary with SSH.
 "
+    )
 }
 
 fn main() -> ExitCode {
@@ -58,6 +69,10 @@ fn real_main() -> Result<ExitCode> {
         match cmd {
             "-h" | "--help" | "help" => {
                 print!("{}", usage());
+                return Ok(ExitCode::SUCCESS);
+            }
+            "-v" | "--version" | "version" => {
+                println!("{}", version_line());
                 return Ok(ExitCode::SUCCESS);
             }
             "shortcut" => {
@@ -96,4 +111,16 @@ fn real_main() -> Result<ExitCode> {
     crate::prune::prune_orphan_state(&paths);
     ui::run(paths)?;
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn version_matches_cargo_toml() {
+        assert_eq!(super::VERSION, env!("CARGO_PKG_VERSION"));
+        assert!(!super::VERSION.is_empty());
+        let line = super::version_line();
+        assert!(line.starts_with("tunnel-ui "));
+        assert!(line.contains(super::VERSION));
+    }
 }

@@ -27,6 +27,8 @@ cargo build --release
 
 The binary is `target/release/tunnel-ui`. Keep it named `tunnel-ui` (the name is how the app recognizes its own supervisor).
 
+Version is `[package].version` in `Cargo.toml`. Print it with `tunnel-ui -v` or `tunnel-ui --version`. Bump that field when you cut a release.
+
 `cargo run` and `target/debug` / `target/release` use the **current working directory** for `configs/` and `.state/` (dev). An installed copy uses `~/.tunnel-ui` (`configs/` and `.state/` under that). `TUNNEL_HOME` overrides either.
 
 ```bash
@@ -76,6 +78,7 @@ Saved files live in `configs/<name>.conf`. Runtime PIDs and logs live in `.state
 The same binary can run without the TUI:
 
 ```bash
+tunnel-ui -v
 tunnel-ui start <name>
 tunnel-ui stop <name>
 tunnel-ui status [name]

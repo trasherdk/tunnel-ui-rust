@@ -22,6 +22,8 @@ use crate::ui::forms::{
 };
 use crate::ui::list::Row;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
     List,
@@ -616,7 +618,7 @@ fn chrome_owned(app: &App) -> (String, String, &'static str) {
             } else {
                 app.status.clone()
             };
-            ("SSH tunnels".into(), status, theme::LIST_KEYS)
+            (format!("SSH tunnels  {VERSION}"), status, theme::LIST_KEYS)
         }
         Screen::EditMenu => {
             let title = if app.edit_is_new {
